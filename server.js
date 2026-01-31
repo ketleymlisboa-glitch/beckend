@@ -1,14 +1,28 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import nodemailer from "nodemailer";
 
+const app = express();
+app.use(express.json());
+
+// CORS: libera só o frontend
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "*",
+    methods: ["GET", "POST"],
+  })
+);
+
+// ---------- EMAIL ----------
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
   secure: false,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
 });
 
 async function sendAccessEmail({ to, title, orderId }) {
@@ -23,44 +37,37 @@ async function sendAccessEmail({ to, title, orderId }) {
       <p>Pedido: <b>${orderId}</b></p>
       <p>Aqui está seu acesso:</p>
       <p><a href="${accessLink}">${accessLink}</a></p>
-    `
+      <p>Se tiver qualquer problema, responda este e-mail.</p>
+    `,
   });
 }
 
-dotenv.config();
-
-const app = express();
-app.use(express.json());
-
-// CORS: libera só o frontend
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "*",
-  methods: ["GET", "POST"],
-}));
-
+// ---------- MERCADO PAGO ----------
 const accessToken = process.env.MP_ACCESS_TOKEN;
 if (!accessToken) {
-  console.error("ERRO: MP_ACCESS_TOKEN não definido no .env");
+  console.error("ERRO: MP_ACCESS_TOKEN não definido nas variáveis de ambiente.");
 }
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
 // Produtos (edite aqui como quiser)
 const PRODUCTS = {
-  p1: { title: "Produto 1 (Digital)", price: 19.90 },
-  p2: { title: "Produto 2 (Digital)", price: 29.90 },
-  p3: { title: "Produto 3 (Digital)", price: 49.90 }
+  p1: { title: "Produto 1 (Digital)", price: 19.9 },
+  p2: { title: "Produto 2 (Digital)", price: 29.9 },
+  p3: { title: "Produto 3 (Digital)", price: 49.9 },
 };
 
 // Upsell (edite)
-const UPSELL = { title: "Upsell — Bônus Turbo", price: 14.90 };
+const UPSELL = { title: "Upsell — Bônus Turbo", price: 14.9 };
 
 // Helper
 function asMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
-app.get("/health", (_, res) => res.json({ ok: true }));
+// ---------- ROTAS ----------
+app.get("/", (req, res) => res.send("API online ✅"));
+app.get("/health", (req, res) => res.json({ ok: true }));
 
 /**
  * Cria a preferência e retorna a URL do checkout (init_point)
@@ -80,8 +87,8 @@ app.post("/api/create-preference", async (req, res) => {
         title: prod.title,
         quantity: 1,
         currency_id: "BRL",
-        unit_price: asMoney(prod.price)
-      }
+        unit_price: asMoney(prod.price),
+      },
     ];
 
     if (withUpsell) {
@@ -89,11 +96,10 @@ app.post("/api/create-preference", async (req, res) => {
         title: UPSELL.title,
         quantity: 1,
         currency_id: "BRL",
-        unit_price: asMoney(UPSELL.price)
+        unit_price: asMoney(UPSELL.price),
       });
     }
 
-    // IMPORTANTÍSSIMO: URLs de retorno
     const frontend = process.env.FRONTEND_URL || "http://localhost:5500";
 
     const prefBody = {
@@ -101,54 +107,65 @@ app.post("/api/create-preference", async (req, res) => {
       back_urls: {
         success: `${frontend}/success.html`,
         failure: `${frontend}/failure.html`,
-        pending: `${frontend}/pending.html`
+        pending: `${frontend}/pending.html`,
       },
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      // notification_url: "https://SEU_DOMINIO.com/api/webhook"  // (opcional) webhook
+      // ✅ Quando ativar webhook, descomente e coloque sua URL:
+      // notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
 
     const result = await preference.create({ body: prefBody });
 
     return res.json({
       init_point: result.init_point,
-      sandbox_init_point: result.sandbox_init_point
+      sandbox_init_point: result.sandbox_init_point,
     });
   } catch (err) {
-    console.error(err);
+    console.error("create-preference erro:", err);
     return res.status(500).json({ error: "Falha ao criar preferência" });
   }
 });
 
 /**
- * (Opcional) Webhook de pagamento — para confirmar “pago”.
- * Você precisa configurar notification_url e também ativar webhooks no painel.
+ * Webhook de pagamento — para confirmar “pago”.
+ * Configure a notification_url (acima) e habilite webhooks no painel do MP.
  */
 app.post("/api/webhook", async (req, res) => {
   try {
-    // Mercado Pago manda eventos diferentes, muitas vezes vem payment id:
     const paymentId = req.query?.id || req.body?.data?.id;
     if (!paymentId) return res.sendStatus(200);
 
     const payment = new Payment(client);
     const data = await payment.get({ id: paymentId });
 
-    // Aqui você salvaria em banco: status, valor, external_reference etc.
     console.log("WEBHOOK payment:", {
       id: data.id,
       status: data.status,
       status_detail: data.status_detail,
       transaction_amount: data.transaction_amount,
-      external_reference: data.external_reference
+      external_reference: data.external_reference,
+      payer_email: data.payer?.email,
     });
 
-    res.sendStatus(200);
+    // ✅ EXEMPLO: se aprovado e tiver e-mail do pagador, envia acesso
+    if (data.status === "approved" && data.payer?.email) {
+      await sendAccessEmail({
+        to: data.payer.email,
+        title: "STA STORE - Acesso",
+        orderId: String(data.id),
+      });
+    }
+
+    return res.sendStatus(200);
   } catch (e) {
     console.error("WEBHOOK erro:", e);
-    res.sendStatus(200);
+    return res.sendStatus(200);
   }
 });
+
+// Rota de teste de e-mail
 app.get("/api/test-email", async (req, res) => {
   try {
     const to = req.query.to;
@@ -158,27 +175,13 @@ app.get("/api/test-email", async (req, res) => {
     }
 
     await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
-    res.json({ ok: true, sentTo: to });
+    return res.json({ ok: true, sentTo: to });
   } catch (e) {
     console.error("TEST EMAIL ERROR:", e);
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
+// ---------- START ----------
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log("Server rodando na porta", PORT);
-});
-        if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
-
-    await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
-    res.json({ ok: true, sentTo: to });
-  } catch (e) {
-    console.error("TEST EMAIL ERROR:", e);
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
-
-});
-
-
+app.listen(PORT, () => console.log("Server rodando na porta", PORT));
