@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { Resend } from "resend";
+
 console.log("VERSAO NOVA DO SERVER ✅ 31/01");
 
 const app = express();
@@ -46,7 +47,6 @@ const accessToken = process.env.MP_ACCESS_TOKEN;
 if (!accessToken) {
   console.error("ERRO: MP_ACCESS_TOKEN não definido nas variáveis de ambiente.");
 }
-
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
@@ -82,7 +82,7 @@ app.get("/api/mp-check", async (req, res) => {
   }
 });
 
-// -------------------- CHECKOUT: CRIAR PREFERÊNCIA --------------------
+// -------------------- CHECKOUT: CRIAR PREFERÊNCIA (POST) --------------------
 /**
  * body: { productId: "p1|p2|p3", withUpsell: true|false }
  */
@@ -92,24 +92,6 @@ app.post("/api/create-preference", async (req, res) => {
     const prod = PRODUCTS[productId];
 
     if (!prod) return res.status(400).json({ error: "productId inválido" });
-// ✅ ATALHO DE TESTE (GET) — pra testar no navegador
-app.get("/api/create-preference-test", async (req, res) => {
-  try {
-    const productId = req.query.productId || "p1";
-    const withUpsell = req.query.withUpsell === "true";
-
-    const r = await fetch(`http://127.0.0.1:${process.env.PORT || 10000}/api/create-preference`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, withUpsell }),
-    });
-
-    const j = await r.json();
-    return res.status(r.status).json(j);
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
-});
 
     const items = [
       {
@@ -129,23 +111,27 @@ app.get("/api/create-preference-test", async (req, res) => {
       });
     }
 
-    // IMPORTANTE: coloque no Render: FRONTEND_URL=https://legitsensi.shop
-    const frontend = process.env.FRONTEND_URL || "http://localhost:5500";
+    // ✅ FRONTEND_URL seguro
+    const frontend = (process.env.FRONTEND_URL || "").trim();
+    const FRONTEND_SAFE =
+      frontend && /^https?:\/\//i.test(frontend)
+        ? frontend.replace(/\/+$/, "") // tira barra final
+        : "https://legitsensi.shop";
 
     const prefBody = {
       items,
       back_urls: {
-        success: `${frontend}/success.html`,
-        failure: `${frontend}/failure.html`,
-        pending: `${frontend}/pending.html`,
+        success: `${FRONTEND_SAFE}/success.html`,
+        failure: `${FRONTEND_SAFE}/failure.html`,
+        pending: `${FRONTEND_SAFE}/pending.html`,
       },
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-
-      // ✅ Quando ativar webhooks no painel do Mercado Pago, descomente:
       // notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
+
+    console.log("PREF BODY:", prefBody);
 
     const result = await preference.create({ body: prefBody });
 
@@ -154,7 +140,6 @@ app.get("/api/create-preference-test", async (req, res) => {
       sandbox_init_point: result.sandbox_init_point,
     });
   } catch (err) {
-    // ✅ AQUI MOSTRA O ERRO REAL DO MP
     console.error("create-preference erro RAW:", err);
 
     const status = err?.status || err?.response?.status || null;
@@ -168,6 +153,28 @@ app.get("/api/create-preference-test", async (req, res) => {
       mp_status: status,
       mp_error: data || String(err?.message || err),
     });
+  }
+});
+
+// ✅ ATALHO DE TESTE (GET) — pra testar no navegador
+app.get("/api/create-preference-test", async (req, res) => {
+  try {
+    const productId = req.query.productId || "p1";
+    const withUpsell =
+      req.query.withUpsell === "1" || req.query.withUpsell === "true";
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+    const r = await fetch(`${baseUrl}/api/create-preference`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, withUpsell }),
+    });
+
+    const j = await r.json();
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
@@ -189,7 +196,6 @@ app.post("/api/webhook", async (req, res) => {
       payer_email: data.payer?.email,
     });
 
-    // Se aprovado e tiver e-mail do pagador, envia acesso
     if (data.status === "approved" && data.payer?.email) {
       await sendAccessEmail({
         to: data.payer.email,
@@ -227,5 +233,3 @@ app.get("/api/test-email", async (req, res) => {
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
-
-
