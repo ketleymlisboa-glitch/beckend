@@ -150,11 +150,11 @@ app.post("/api/webhook", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Server rodando na porta ${port}`));
-app.get("/api/test-email", async (req, res) => {
-  try {
-    const to = req.query.to;
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => {
+  console.log("Server rodando na porta", PORT);
+});
     if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
 
     await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
@@ -163,4 +163,5 @@ app.get("/api/test-email", async (req, res) => {
     console.error("TEST EMAIL ERROR:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
+
 });
