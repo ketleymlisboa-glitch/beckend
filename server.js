@@ -8,13 +8,21 @@ import { Resend } from "resend";
 
 console.log("VERSAO NOVA DO SERVER ✅ 31/01");
 
+// -------------------- APP --------------------
 const app = express();
 app.use(express.json());
 
 // -------------------- CORS --------------------
+const FRONTEND_URL = (process.env.FRONTEND_URL || "").trim();
+const FRONTEND_SAFE =
+  FRONTEND_URL && /^https?:\/\//i.test(FRONTEND_URL)
+    ? FRONTEND_URL.replace(/\/+$/, "")
+    : "https://legitsensi.shop";
+
+// Se quiser travar CORS só no seu domínio, use FRONTEND_SAFE
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: FRONTEND_SAFE, // antes era "*" — mais seguro assim
     methods: ["GET", "POST"],
   })
 );
@@ -23,7 +31,9 @@ app.use(
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAccessEmail({ to, title, orderId }) {
-  const accessLink = `https://legitsensi.shop/acesso?pedido=${orderId}`;
+  const accessLink = `${FRONTEND_SAFE}/acesso?pedido=${encodeURIComponent(
+    orderId
+  )}`;
 
   const result = await resend.emails.send({
     from: process.env.MAIL_FROM,
@@ -43,10 +53,11 @@ async function sendAccessEmail({ to, title, orderId }) {
 }
 
 // -------------------- MERCADO PAGO --------------------
-const accessToken = process.env.MP_ACCESS_TOKEN;
+const accessToken = (process.env.MP_ACCESS_TOKEN || "").trim();
 if (!accessToken) {
   console.error("ERRO: MP_ACCESS_TOKEN não definido nas variáveis de ambiente.");
 }
+
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
@@ -60,7 +71,6 @@ const PRODUCTS = {
 // ✅ Upsell (1 centavo)
 const UPSELL = { title: "Upsell — Bônus Turbo", price: 0.01 };
 
-// Helper
 function asMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -72,13 +82,19 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 // -------------------- DEBUG TOKEN MP (CONFERE SE É VÁLIDO) --------------------
 app.get("/api/mp-check", async (req, res) => {
   try {
+    // Node 18+ tem fetch global. Se não tiver, isso vai falhar e cair no catch.
     const r = await fetch("https://api.mercadopago.com/users/me", {
-      headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     const j = await r.json();
     return res.status(r.status).json(j);
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    return res.status(500).json({
+      ok: false,
+      error:
+        "Falha no fetch. Se estiver usando Node < 18, instale node-fetch ou atualize o Node. " +
+        String(e?.message || e),
+    });
   }
 });
 
@@ -111,12 +127,7 @@ app.post("/api/create-preference", async (req, res) => {
       });
     }
 
-    // ✅ FRONTEND_URL seguro
-    const frontend = (process.env.FRONTEND_URL || "").trim();
-    const FRONTEND_SAFE =
-      frontend && /^https?:\/\//i.test(frontend)
-        ? frontend.replace(/\/+$/, "")
-        : "https://legitsensi.shop";
+    const WEBHOOK_URL = (process.env.WEBHOOK_URL || "").trim();
 
     const prefBody = {
       items,
@@ -126,9 +137,11 @@ app.post("/api/create-preference", async (req, res) => {
         pending: `${FRONTEND_SAFE}/pending.html`,
       },
       auto_return: "approved",
+      // descriptor: pode dar erro se tiver caracteres inválidos / tamanho
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      notification_url: "https://beckend-evqc.onrender.com/api/webhook",
+      // ✅ webhook via variável (mais fácil trocar sem mexer no código)
+      notification_url: WEBHOOK_URL || undefined,
     };
 
     console.log("PREF BODY:", prefBody);
@@ -136,6 +149,7 @@ app.post("/api/create-preference", async (req, res) => {
     const result = await preference.create({ body: prefBody });
 
     return res.json({
+      id: result.id,
       init_point: result.init_point,
       sandbox_init_point: result.sandbox_init_point,
     });
@@ -179,10 +193,20 @@ app.get("/api/create-preference-test", async (req, res) => {
 });
 
 // -------------------- WEBHOOK --------------------
+// ✅ Evita enviar e-mail duplicado em re-tentativas do Mercado Pago
+const sentPayments = new Set();
+
 app.post("/api/webhook", async (req, res) => {
   try {
     const paymentId = req.query?.id || req.body?.data?.id;
+
+    // MP pode mandar chamadas sem id útil; sempre responda 200
     if (!paymentId) return res.sendStatus(200);
+
+    // Se já processamos esse pagamento, evita duplicar e-mail
+    if (sentPayments.has(String(paymentId))) {
+      return res.sendStatus(200);
+    }
 
     const payment = new Payment(client);
     const data = await payment.get({ id: paymentId });
@@ -197,6 +221,8 @@ app.post("/api/webhook", async (req, res) => {
     });
 
     if (data.status === "approved" && data.payer?.email) {
+      sentPayments.add(String(data.id)); // marca como enviado
+
       await sendAccessEmail({
         to: data.payer.email,
         title: "STA STORE - Acesso",
