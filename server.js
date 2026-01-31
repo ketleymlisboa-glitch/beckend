@@ -2,18 +2,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
-
-dotenv.config();
 import nodemailer from "nodemailer";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
   secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
 });
 
 async function sendAccessEmail({ to, title, orderId }) {
@@ -28,10 +23,11 @@ async function sendAccessEmail({ to, title, orderId }) {
       <p>Pedido: <b>${orderId}</b></p>
       <p>Aqui está seu acesso:</p>
       <p><a href="${accessLink}">${accessLink}</a></p>
-      <p>Se tiver qualquer problema, responda este e-mail.</p>
     `
   });
 }
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
@@ -167,5 +163,4 @@ app.get("/api/test-email", async (req, res) => {
     console.error("TEST EMAIL ERROR:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
-
 });
