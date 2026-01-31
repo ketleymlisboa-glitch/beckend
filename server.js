@@ -52,13 +52,13 @@ const preference = new Preference(client);
 
 // Produtos
 const PRODUCTS = {
-  p1: { title: "Produto 1 (Digital)", price: 19.9 },
-  p2: { title: "Produto 2 (Digital)", price: 29.9 },
-  p3: { title: "Produto 3 (Digital)", price: 49.9 },
+  p1: { title: "Produto 1 (Digital)", price: 0.2 },
+  p2: { title: "Produto 2 (Digital)", price: 0.2 },
+  p3: { title: "Produto 3 (Digital)", price: 0.2 },
 };
 
 // Upsell
-const UPSELL = { title: "Upsell — Bônus Turbo", price: 14.9 };
+const UPSELL = { title: "Upsell — Bônus Turbo", price: 0.2 };
 
 // Helper
 function asMoney(n) {
@@ -233,3 +233,4 @@ app.get("/api/test-email", async (req, res) => {
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+
