@@ -50,15 +50,15 @@ if (!accessToken) {
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
-// Produtos
+// ✅ Produtos (1 centavo cada)
 const PRODUCTS = {
-  p1: { title: "Produto 1 (Digital)", price: 0.2 },
-  p2: { title: "Produto 2 (Digital)", price: 0.2 },
-  p3: { title: "Produto 3 (Digital)", price: 0.2 },
+  p1: { title: "Produto 1 (Digital)", price: 0.01 },
+  p2: { title: "Produto 2 (Digital)", price: 0.01 },
+  p3: { title: "Produto 3 (Digital)", price: 0.01 },
 };
 
-// Upsell
-const UPSELL = { title: "Upsell — Bônus Turbo", price: 0.2 };
+// ✅ Upsell (1 centavo)
+const UPSELL = { title: "Upsell — Bônus Turbo", price: 0.01 };
 
 // Helper
 function asMoney(n) {
@@ -128,7 +128,7 @@ app.post("/api/create-preference", async (req, res) => {
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      notification_url: "https://beckend-evqc.onrender.com/api/webhook"
+      notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
 
     console.log("PREF BODY:", prefBody);
@@ -233,4 +233,3 @@ app.get("/api/test-email", async (req, res) => {
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
-
