@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { Resend } from "resend";
+console.log("VERSAO NOVA DO SERVER ✅ 31/01");
 
 const app = express();
 app.use(express.json());
@@ -226,4 +227,5 @@ app.get("/api/test-email", async (req, res) => {
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+
 
