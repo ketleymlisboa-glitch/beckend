@@ -91,6 +91,24 @@ app.post("/api/create-preference", async (req, res) => {
     const prod = PRODUCTS[productId];
 
     if (!prod) return res.status(400).json({ error: "productId inválido" });
+// ✅ ATALHO DE TESTE (GET) — pra testar no navegador
+app.get("/api/create-preference-test", async (req, res) => {
+  try {
+    const productId = req.query.productId || "p1";
+    const withUpsell = req.query.withUpsell === "true";
+
+    const r = await fetch(`http://127.0.0.1:${process.env.PORT || 10000}/api/create-preference`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, withUpsell }),
+    });
+
+    const j = await r.json();
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
     const items = [
       {
@@ -208,3 +226,4 @@ app.get("/api/test-email", async (req, res) => {
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+
