@@ -12,9 +12,13 @@ const app = express();
 app.use(express.json());
 
 // -------------------- CORS --------------------
+// Se FRONTEND_URL existir, libera ele.
+// Se não existir, libera tudo (útil pra testes), mas prefira setar FRONTEND_URL em produção.
+const allowedOrigin = (process.env.FRONTEND_URL || "*").trim();
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: allowedOrigin,
     methods: ["GET", "POST"],
   })
 );
@@ -128,7 +132,9 @@ app.post("/api/create-preference", async (req, res) => {
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      // notification_url: "https://beckend-evqc.onrender.com/api/webhook",
+
+      // ✅ ATIVA O WEBHOOK AQUI (IMPORTANTE)
+      notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
 
     console.log("PREF BODY:", prefBody);
