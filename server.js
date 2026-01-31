@@ -4,7 +4,7 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const app = express();
 app.use(express.json());
@@ -17,19 +17,14 @@ app.use(
   })
 );
 
-// ---------- EMAIL ----------
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: false,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-});
+// ---------- EMAIL (RESEND) ----------
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAccessEmail({ to, title, orderId }) {
   const accessLink = `https://legitsensi.shop/acesso?pedido=${orderId}`;
 
-  await transporter.sendMail({
-    from: process.env.MAIL_FROM,
+  await resend.emails.send({
+    from: process.env.MAIL_FROM, // ex: "STA STORE <onboarding@resend.dev>"
     to,
     subject: `Seu acesso: ${title}`,
     html: `
@@ -50,14 +45,14 @@ if (!accessToken) {
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
-// Produtos (edite aqui como quiser)
+// Produtos
 const PRODUCTS = {
   p1: { title: "Produto 1 (Digital)", price: 19.9 },
   p2: { title: "Produto 2 (Digital)", price: 29.9 },
   p3: { title: "Produto 3 (Digital)", price: 49.9 },
 };
 
-// Upsell (edite)
+// Upsell
 const UPSELL = { title: "Upsell — Bônus Turbo", price: 14.9 };
 
 // Helper
@@ -70,7 +65,7 @@ app.get("/", (req, res) => res.send("API online ✅"));
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 /**
- * Cria a preferência e retorna a URL do checkout (init_point)
+ * Cria preferência e retorna checkout
  * body: { productId: "p1|p2|p3", withUpsell: true|false }
  */
 app.post("/api/create-preference", async (req, res) => {
@@ -78,9 +73,7 @@ app.post("/api/create-preference", async (req, res) => {
     const { productId, withUpsell } = req.body || {};
     const prod = PRODUCTS[productId];
 
-    if (!prod) {
-      return res.status(400).json({ error: "productId inválido" });
-    }
+    if (!prod) return res.status(400).json({ error: "productId inválido" });
 
     const items = [
       {
@@ -112,7 +105,7 @@ app.post("/api/create-preference", async (req, res) => {
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      // ✅ Quando ativar webhook, descomente e coloque sua URL:
+      // ✅ quando for usar webhook no MP, descomente:
       // notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
 
@@ -129,8 +122,7 @@ app.post("/api/create-preference", async (req, res) => {
 });
 
 /**
- * Webhook de pagamento — para confirmar “pago”.
- * Configure a notification_url (acima) e habilite webhooks no painel do MP.
+ * Webhook (opcional) — envia e-mail quando aprovado
  */
 app.post("/api/webhook", async (req, res) => {
   try {
@@ -149,7 +141,6 @@ app.post("/api/webhook", async (req, res) => {
       payer_email: data.payer?.email,
     });
 
-    // ✅ EXEMPLO: se aprovado e tiver e-mail do pagador, envia acesso
     if (data.status === "approved" && data.payer?.email) {
       await sendAccessEmail({
         to: data.payer.email,
@@ -169,10 +160,7 @@ app.post("/api/webhook", async (req, res) => {
 app.get("/api/test-email", async (req, res) => {
   try {
     const to = req.query.to;
-
-    if (!to) {
-      return res.status(400).send("Passe ?to=seuemail@gmail.com");
-    }
+    if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
 
     await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
     return res.json({ ok: true, sentTo: to });
