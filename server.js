@@ -149,13 +149,28 @@ app.post("/api/webhook", async (req, res) => {
     res.sendStatus(200);
   }
 });
+app.get("/api/test-email", async (req, res) => {
+  try {
+    const to = req.query.to;
+
+    if (!to) {
+      return res.status(400).send("Passe ?to=seuemail@gmail.com");
+    }
+
+    await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
+    res.json({ ok: true, sentTo: to });
+  } catch (e) {
+    console.error("TEST EMAIL ERROR:", e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
 
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
   console.log("Server rodando na porta", PORT);
 });
-    if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
+        if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
 
     await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
     res.json({ ok: true, sentTo: to });
@@ -165,7 +180,5 @@ app.listen(PORT, () => {
   }
 
 });
-app.get("/", (req, res) => {
-  res.send("API online ✅");
-});
+
 
