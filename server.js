@@ -9,7 +9,7 @@ import { Resend } from "resend";
 const app = express();
 app.use(express.json());
 
-// CORS: libera só o frontend
+// -------------------- CORS --------------------
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || "*",
@@ -17,14 +17,14 @@ app.use(
   })
 );
 
-// ---------- EMAIL (RESEND) ----------
+// -------------------- EMAIL (RESEND) --------------------
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAccessEmail({ to, title, orderId }) {
   const accessLink = `https://legitsensi.shop/acesso?pedido=${orderId}`;
 
   const result = await resend.emails.send({
-    from: process.env.MAIL_FROM, // ex: "STA STORE <onboarding@resend.dev>"
+    from: process.env.MAIL_FROM, // ex: "STA STORE <onboarding@resend.dev>" ou "STA STORE <vendas@legitsensi.shop>"
     to,
     subject: `Seu acesso: ${title}`,
     html: `
@@ -40,11 +40,12 @@ async function sendAccessEmail({ to, title, orderId }) {
   return result;
 }
 
-// ---------- MERCADO PAGO ----------
+// -------------------- MERCADO PAGO --------------------
 const accessToken = process.env.MP_ACCESS_TOKEN;
 if (!accessToken) {
   console.error("ERRO: MP_ACCESS_TOKEN não definido nas variáveis de ambiente.");
 }
+
 const client = new MercadoPagoConfig({ accessToken });
 const preference = new Preference(client);
 
@@ -63,12 +64,25 @@ function asMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
-// ---------- ROTAS ----------
+// -------------------- ROTAS BÁSICAS --------------------
 app.get("/", (req, res) => res.send("API online ✅"));
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+// -------------------- DEBUG TOKEN MP (CONFERE SE É VÁLIDO) --------------------
+app.get("/api/mp-check", async (req, res) => {
+  try {
+    const r = await fetch("https://api.mercadopago.com/users/me", {
+      headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+    });
+    const j = await r.json();
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// -------------------- CHECKOUT: CRIAR PREFERÊNCIA --------------------
 /**
- * Cria preferência e retorna checkout
  * body: { productId: "p1|p2|p3", withUpsell: true|false }
  */
 app.post("/api/create-preference", async (req, res) => {
@@ -96,6 +110,7 @@ app.post("/api/create-preference", async (req, res) => {
       });
     }
 
+    // IMPORTANTE: coloque no Render: FRONTEND_URL=https://legitsensi.shop
     const frontend = process.env.FRONTEND_URL || "http://localhost:5500";
 
     const prefBody = {
@@ -108,7 +123,8 @@ app.post("/api/create-preference", async (req, res) => {
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      // ✅ quando for usar webhook no MP, descomente:
+
+      // ✅ Quando ativar webhooks no painel do Mercado Pago, descomente:
       // notification_url: "https://beckend-evqc.onrender.com/api/webhook",
     };
 
@@ -119,14 +135,24 @@ app.post("/api/create-preference", async (req, res) => {
       sandbox_init_point: result.sandbox_init_point,
     });
   } catch (err) {
-    console.error("create-preference erro:", err);
-    return res.status(500).json({ error: "Falha ao criar preferência" });
+    // ✅ AQUI MOSTRA O ERRO REAL DO MP
+    console.error("create-preference erro RAW:", err);
+
+    const status = err?.status || err?.response?.status || null;
+    const data = err?.response?.data || err?.cause || null;
+
+    console.error("MP status:", status);
+    console.error("MP data:", data);
+
+    return res.status(500).json({
+      error: "Falha ao criar preferência",
+      mp_status: status,
+      mp_error: data || String(err?.message || err),
+    });
   }
 });
 
-/**
- * Webhook (opcional) — envia e-mail quando aprovado
- */
+// -------------------- WEBHOOK (OPCIONAL) --------------------
 app.post("/api/webhook", async (req, res) => {
   try {
     const paymentId = req.query?.id || req.body?.data?.id;
@@ -144,6 +170,7 @@ app.post("/api/webhook", async (req, res) => {
       payer_email: data.payer?.email,
     });
 
+    // Se aprovado e tiver e-mail do pagador, envia acesso
     if (data.status === "approved" && data.payer?.email) {
       await sendAccessEmail({
         to: data.payer.email,
@@ -159,6 +186,7 @@ app.post("/api/webhook", async (req, res) => {
   }
 });
 
+// -------------------- TESTE DE EMAIL --------------------
 app.get("/api/test-email", async (req, res) => {
   try {
     const to = req.query.to;
@@ -177,7 +205,6 @@ app.get("/api/test-email", async (req, res) => {
   }
 });
 
-// ---------- START ----------
+// -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
-
