@@ -12,13 +12,9 @@ const app = express();
 app.use(express.json());
 
 // -------------------- CORS --------------------
-// Se FRONTEND_URL existir, libera ele.
-// Se não existir, libera tudo (útil pra testes), mas prefira setar FRONTEND_URL em produção.
-const allowedOrigin = (process.env.FRONTEND_URL || "*").trim();
-
 app.use(
   cors({
-    origin: allowedOrigin,
+    origin: process.env.FRONTEND_URL || "*",
     methods: ["GET", "POST"],
   })
 );
@@ -30,7 +26,7 @@ async function sendAccessEmail({ to, title, orderId }) {
   const accessLink = `https://legitsensi.shop/acesso?pedido=${orderId}`;
 
   const result = await resend.emails.send({
-    from: process.env.MAIL_FROM, // ex: "STA STORE <onboarding@resend.dev>" ou "STA STORE <vendas@legitsensi.shop>"
+    from: process.env.MAIL_FROM,
     to,
     subject: `Seu acesso: ${title}`,
     html: `
@@ -119,7 +115,7 @@ app.post("/api/create-preference", async (req, res) => {
     const frontend = (process.env.FRONTEND_URL || "").trim();
     const FRONTEND_SAFE =
       frontend && /^https?:\/\//i.test(frontend)
-        ? frontend.replace(/\/+$/, "") // tira barra final
+        ? frontend.replace(/\/+$/, "")
         : "https://legitsensi.shop";
 
     const prefBody = {
@@ -132,9 +128,7 @@ app.post("/api/create-preference", async (req, res) => {
       auto_return: "approved",
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-
-      // ✅ ATIVA O WEBHOOK AQUI (IMPORTANTE)
-      notification_url: "https://beckend-evqc.onrender.com/api/webhook",
+      notification_url: "https://beckend-evqc.onrender.com/api/webhook"
     };
 
     console.log("PREF BODY:", prefBody);
@@ -184,7 +178,7 @@ app.get("/api/create-preference-test", async (req, res) => {
   }
 });
 
-// -------------------- WEBHOOK (OPCIONAL) --------------------
+// -------------------- WEBHOOK --------------------
 app.post("/api/webhook", async (req, res) => {
   try {
     const paymentId = req.query?.id || req.body?.data?.id;
