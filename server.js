@@ -23,7 +23,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 async function sendAccessEmail({ to, title, orderId }) {
   const accessLink = `https://legitsensi.shop/acesso?pedido=${orderId}`;
 
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: process.env.MAIL_FROM, // ex: "STA STORE <onboarding@resend.dev>"
     to,
     subject: `Seu acesso: ${title}`,
@@ -35,6 +35,9 @@ async function sendAccessEmail({ to, title, orderId }) {
       <p>Se tiver qualquer problema, responda este e-mail.</p>
     `,
   });
+
+  console.log("RESEND RESULT:", result);
+  return result;
 }
 
 // ---------- MERCADO PAGO ----------
@@ -156,14 +159,18 @@ app.post("/api/webhook", async (req, res) => {
   }
 });
 
-// Rota de teste de e-mail
 app.get("/api/test-email", async (req, res) => {
   try {
     const to = req.query.to;
     if (!to) return res.status(400).send("Passe ?to=seuemail@gmail.com");
 
-    await sendAccessEmail({ to, title: "Teste STA STORE", orderId: "TESTE123" });
-    return res.json({ ok: true, sentTo: to });
+    const r = await sendAccessEmail({
+      to,
+      title: "Teste STA STORE",
+      orderId: "TESTE123",
+    });
+
+    return res.json({ ok: true, sentTo: to, resend: r });
   } catch (e) {
     console.error("TEST EMAIL ERROR:", e);
     return res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -173,3 +180,4 @@ app.get("/api/test-email", async (req, res) => {
 // ---------- START ----------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+
