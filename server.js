@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { Resend } from "resend";
 
-import User from "./models/User.js";
+import User from "./User.js";
 
 console.log("VERSAO NOVA DO SERVER ✅ 31/01 + AUTH");
 
@@ -386,4 +386,5 @@ connectMongo()
     console.error("Falha ao conectar no Mongo:", e);
     // ainda sobe a API (MP/email) mesmo sem banco, pra não travar seu checkout
     app.listen(PORT, () => console.log("Server rodando (SEM MONGO) na porta", PORT));
+
   });
