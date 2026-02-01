@@ -224,7 +224,7 @@ app.get("/api/me", authRequired, (req, res) => {
 });
 
 // -------------------- CHECKOUT: CRIAR PREFERÊNCIA --------------------
-app.post("/api/create-preference", async (req, res) => {
+app.post("/api/create-preference", authRequired, async (req, res) => {
   try {
     const { productId, withUpsell } = req.body || {};
     const prod = PRODUCTS[productId];
