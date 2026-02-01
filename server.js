@@ -3,37 +3,94 @@ dotenv.config();
 
 import express from "express";
 import cors from "cors";
+import mongoose from "mongoose";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+
 import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { Resend } from "resend";
 
-console.log("VERSAO NOVA DO SERVER ✅ 31/01");
+import User from "./models/User.js";
+
+console.log("VERSAO NOVA DO SERVER ✅ 31/01 + AUTH");
 
 // -------------------- APP --------------------
 const app = express();
 app.use(express.json());
 
-// -------------------- CORS --------------------
+// -------------------- FRONTEND SAFE --------------------
 const FRONTEND_URL = (process.env.FRONTEND_URL || "").trim();
 const FRONTEND_SAFE =
   FRONTEND_URL && /^https?:\/\//i.test(FRONTEND_URL)
     ? FRONTEND_URL.replace(/\/+$/, "")
     : "https://legitsensi.shop";
 
-// Se quiser travar CORS só no seu domínio, use FRONTEND_SAFE
+// -------------------- CORS (melhor) --------------------
+const allowedOrigins = [
+  FRONTEND_SAFE,
+  FRONTEND_SAFE.replace("://", "://www."),
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5500",
+];
+
 app.use(
   cors({
-    origin: FRONTEND_SAFE, // antes era "*" — mais seguro assim
+    origin: function (origin, callback) {
+      // permite chamadas sem origin (ex: curl/postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      return callback(new Error("CORS bloqueado para: " + origin), false);
+    },
     methods: ["GET", "POST"],
+    credentials: true,
   })
 );
+
+// -------------------- MONGODB --------------------
+async function connectMongo() {
+  const uri = (process.env.MONGO_URI || "").trim();
+  if (!uri) {
+    console.error("ERRO: MONGO_URI não definido.");
+    return;
+  }
+  await mongoose.connect(uri);
+  console.log("MongoDB conectado ✅");
+}
+
+// -------------------- AUTH HELPERS --------------------
+function createToken(user) {
+  const secret = (process.env.JWT_SECRET || "").trim();
+  if (!secret) throw new Error("JWT_SECRET não definido no .env");
+  return jwt.sign(
+    { uid: String(user._id), email: user.email, name: user.name },
+    secret,
+    { expiresIn: "7d" }
+  );
+}
+
+function authRequired(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+
+  if (!token) return res.status(401).json({ error: "Sem token." });
+
+  try {
+    const payload = jwt.verify(token, (process.env.JWT_SECRET || "").trim());
+    req.user = payload;
+    return next();
+  } catch {
+    return res.status(401).json({ error: "Token inválido." });
+  }
+}
 
 // -------------------- EMAIL (RESEND) --------------------
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAccessEmail({ to, title, orderId }) {
-  const accessLink = `${FRONTEND_SAFE}/acesso?pedido=${encodeURIComponent(
-    orderId
-  )}`;
+  const accessLink = `${FRONTEND_SAFE}/acesso?pedido=${encodeURIComponent(orderId)}`;
 
   const result = await resend.emails.send({
     from: process.env.MAIL_FROM,
@@ -79,10 +136,82 @@ function asMoney(n) {
 app.get("/", (req, res) => res.send("API online ✅"));
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// -------------------- DEBUG TOKEN MP (CONFERE SE É VÁLIDO) --------------------
+// -------------------- AUTH: REGISTER --------------------
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body || {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "Preencha nome, e-mail e senha." });
+    }
+
+    const emailNorm = String(email).toLowerCase().trim();
+    const nameNorm = String(name).trim();
+    const pass = String(password);
+
+    if (nameNorm.length < 2) return res.status(400).json({ error: "Nome muito curto." });
+    if (pass.length < 6) return res.status(400).json({ error: "Senha mínima: 6 caracteres." });
+
+    const exists = await User.findOne({ email: emailNorm });
+    if (exists) return res.status(409).json({ error: "E-mail já cadastrado." });
+
+    const passwordHash = await bcrypt.hash(pass, 10);
+
+    const user = await User.create({
+      name: nameNorm,
+      email: emailNorm,
+      passwordHash,
+    });
+
+    const token = createToken(user);
+
+    return res.json({
+      ok: true,
+      token,
+      user: { name: user.name, email: user.email },
+    });
+  } catch (e) {
+    console.error("REGISTER ERR:", e);
+    return res.status(500).json({ error: "Erro no servidor." });
+  }
+});
+
+// -------------------- AUTH: LOGIN --------------------
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "Preencha e-mail e senha." });
+
+    const emailNorm = String(email).toLowerCase().trim();
+    const pass = String(password);
+
+    const user = await User.findOne({ email: emailNorm });
+    if (!user) return res.status(401).json({ error: "E-mail ou senha incorretos." });
+
+    const ok = await bcrypt.compare(pass, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: "E-mail ou senha incorretos." });
+
+    const token = createToken(user);
+
+    return res.json({
+      ok: true,
+      token,
+      user: { name: user.name, email: user.email },
+    });
+  } catch (e) {
+    console.error("LOGIN ERR:", e);
+    return res.status(500).json({ error: "Erro no servidor." });
+  }
+});
+
+// -------------------- AUTH: ME (rota protegida) --------------------
+app.get("/api/me", authRequired, (req, res) => {
+  return res.json({ ok: true, user: req.user });
+});
+
+// -------------------- DEBUG TOKEN MP --------------------
 app.get("/api/mp-check", async (req, res) => {
   try {
-    // Node 18+ tem fetch global. Se não tiver, isso vai falhar e cair no catch.
     const r = await fetch("https://api.mercadopago.com/users/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -98,10 +227,7 @@ app.get("/api/mp-check", async (req, res) => {
   }
 });
 
-// -------------------- CHECKOUT: CRIAR PREFERÊNCIA (POST) --------------------
-/**
- * body: { productId: "p1|p2|p3", withUpsell: true|false }
- */
+// -------------------- CHECKOUT: CRIAR PREFERÊNCIA --------------------
 app.post("/api/create-preference", async (req, res) => {
   try {
     const { productId, withUpsell } = req.body || {};
@@ -137,11 +263,12 @@ app.post("/api/create-preference", async (req, res) => {
         pending: `${FRONTEND_SAFE}/pending.html`,
       },
       auto_return: "approved",
-      // descriptor: pode dar erro se tiver caracteres inválidos / tamanho
       statement_descriptor: "STA STORE",
       external_reference: `sta_${productId}_${withUpsell ? "upsell" : "no"}_${Date.now()}`,
-      // ✅ webhook via variável (mais fácil trocar sem mexer no código)
       notification_url: WEBHOOK_URL || undefined,
+      payment_methods: {
+        excluded_payment_types: [{ id: "account_money" }], // evita pedir login do MP
+      },
     };
 
     console.log("PREF BODY:", prefBody);
@@ -170,12 +297,11 @@ app.post("/api/create-preference", async (req, res) => {
   }
 });
 
-// ✅ ATALHO DE TESTE (GET) — pra testar no navegador
+// ✅ ATALHO DE TESTE
 app.get("/api/create-preference-test", async (req, res) => {
   try {
     const productId = req.query.productId || "p1";
-    const withUpsell =
-      req.query.withUpsell === "1" || req.query.withUpsell === "true";
+    const withUpsell = req.query.withUpsell === "1" || req.query.withUpsell === "true";
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
 
@@ -193,20 +319,14 @@ app.get("/api/create-preference-test", async (req, res) => {
 });
 
 // -------------------- WEBHOOK --------------------
-// ✅ Evita enviar e-mail duplicado em re-tentativas do Mercado Pago
 const sentPayments = new Set();
 
 app.post("/api/webhook", async (req, res) => {
   try {
     const paymentId = req.query?.id || req.body?.data?.id;
-
-    // MP pode mandar chamadas sem id útil; sempre responda 200
     if (!paymentId) return res.sendStatus(200);
 
-    // Se já processamos esse pagamento, evita duplicar e-mail
-    if (sentPayments.has(String(paymentId))) {
-      return res.sendStatus(200);
-    }
+    if (sentPayments.has(String(paymentId))) return res.sendStatus(200);
 
     const payment = new Payment(client);
     const data = await payment.get({ id: paymentId });
@@ -221,8 +341,7 @@ app.post("/api/webhook", async (req, res) => {
     });
 
     if (data.status === "approved" && data.payer?.email) {
-      sentPayments.add(String(data.id)); // marca como enviado
-
+      sentPayments.add(String(data.id));
       await sendAccessEmail({
         to: data.payer.email,
         title: "STA STORE - Acesso",
@@ -258,4 +377,13 @@ app.get("/api/test-email", async (req, res) => {
 
 // -------------------- START --------------------
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+
+connectMongo()
+  .then(() => {
+    app.listen(PORT, () => console.log("Server rodando na porta", PORT));
+  })
+  .catch((e) => {
+    console.error("Falha ao conectar no Mongo:", e);
+    // ainda sobe a API (MP/email) mesmo sem banco, pra não travar seu checkout
+    app.listen(PORT, () => console.log("Server rodando (SEM MONGO) na porta", PORT));
+  });
